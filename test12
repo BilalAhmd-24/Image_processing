@@ -1,0 +1,84 @@
+#for i in indices:
+for i in range(2,25):
+    if not(train_df['is_tma'][i]):
+        imgname= str(test_df['file_path'])
+        #'/kaggle/input/UBC-OCEAN/test_thumbnails/'+\
+                        #test_df['image_id'][i]+'_thumbnail.png'
+        print(imgname)
+        t0 = time.time()
+       
+        thumb = imread(imgname)
+        thumb[np.where((thumb==[0,0,0]).all(axis=2))] = [255,255,255]
+        tsize = thumb.shape
+        tres = get_thumbnail_resolution(tsize[:2],(train_df['image_width'][i],
+                                    train_df['image_height'][i]),wsi_resolution)
+        tpatch_size = get_thumbnail_patch_size(tres,wsi_patch_size,wsi_resolution)
+        mask_image = getmask(thumb)
+        #mask1 = flip_mask_vals(mask_image)        
+        patches = extract_patches(thumb,mask_image,tpatch_size)
+       
+        coords = patchextraction.PatchExtractor.filter_coordinates(
+                    WSIReader.open(mask_image),patches.coordinate_list,
+                    wsi_shape=mask_image.shape,min_mask_ratio=0.9)
+        del mask_image
+        num_patches = len(coords)
+        t1 = time.time()
+        print('total patches in image:',train_df['image_id'][i],'is',num_patches)
+        print('Total duration for loading loading thumbnail, and patch extraction',
+              t1-t0)
+       
+        mag_factor = get_magnifying_factor(wsi_patch_size,tpatch_size)
+       
+        t2 = time.time()
+        patches_512 = save_patches_512(patches,coords,tpatch_size, wsi_patch_size,
+                                   train_df['image_id'][i],train_df['label'][i],
+                                   patch_images_dir,mag_factor)
+        t3 = time.time()
+        print('Total time to save orig patches',t3-t2)
+       
+       
+        ## Extract tumor patches
+        imglist = [patch_images_dir + '/' +
+                   train_df['label'][i] + '/' + x for x in patches_512]
+       
+        tum_patches = get_patches_prediction_512(imglist,(224,224),
+                                train_df['image_id'][i],train_df['label'][i],
+                                patch_images_dir)
+       
+        t4 = time.time()
+        print('Total time to get patch predictions',t4-t3)
+        print('total tumor patchesfor image',train_df['image_id'][i],'is',
+              len(tum_patches))
+        patch_stats[train_df['image_id'][i]]=(num_patches,len(tum_patches))
+
+
+
+
+
+def get_file_path(image_id):
+    if os.path.exists(f"{PATH_DIR}/test_thumbnails/{image_id}_thumbnail.png"):
+        return f"{PATH_DIR}/test_thumbnails/{image_id}_thumbnail.png"
+    else:
+        return f"{PATH_DIR}/train_images/{image_id}.png"
+    
+    
+test_df['file_path'] = test_df['image_id'].apply(get_file_path)
+
+test_df.head()
+
+test = []
+
+def load_image(filename):
+    img = load_img(filename, target_size=(IMG_SIZE, IMG_SIZE))
+    img = img_to_array(img)
+    return img
+
+
+for i in tqdm(range(len(test_files))):
+    file_path = test_df.iloc[i]['file_path']
+    test.append(load_image(file_path))
+    
+ds_test = tf.data.Dataset.from_tensor_slices(np.array(test))
+ds_test = ds_test.batch(batch_size=batch_size)
+
+print(ds_test)
